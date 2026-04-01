@@ -1,9 +1,9 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useMemo } from 'react';
 import { useGameStore } from '../store/gameStore';
 import { Spline2D } from '../utils/spline';
 
 // Define the track waypoints (a curvy oval)
-const trackPoints = [
+const points = [
   { x: 100, y: 100 },
   { x: 700, y: 100 },
   { x: 800, y: 300 },
@@ -13,7 +13,7 @@ const trackPoints = [
   { x: 50, y: 300 },
 ];
 
-const spline = new Spline2D(trackPoints);
+const spline = new Spline2D(points);
 
 // Simple Audio Synthesizer for Electric Motor
 class MotorSound {
@@ -89,40 +89,94 @@ export const GameCanvas: React.FC = () => {
   const isDerailed = useGameStore((state) => state.isDerailed);
   const setAccelerating = useGameStore((state) => state.setAccelerating);
   
-  const playerT = useRef(0);
-  const driftAngle = useRef(0); // For visual drifting
-  const lateralOffset = useRef(0); // For deslotting
+  const carPos = useRef({ x: points[0].x, y: points[0].y });
+  const carAngle = useRef(Math.atan2(points[1].y - points[0].y, points[1].x - points[0].x));
+  const carSpeed = useRef(0);
+  const hasStarted = useRef(false);
+  const nextCheckpoint = useRef(1); // 0 is start, 1 is middle, 2 is end
+  
   const zoomLevel = useRef(1.4); // For zooming
   
   const lastTime = useRef(performance.now());
   const animationFrameId = useRef<number>(0);
 
-  // Physics constants
-  const ACCELERATION = 12; // Slower, progressive acceleration
-  const BRAKING_FRICTION = 8; // Engine braking
-  const COASTING_FRICTION = 2; // Rolling resistance
-  const MAX_SPEED = 35; // Higher top speed
-  const GRIP_LIMIT = 22; // Speed at which drifting starts
-  const DERAIL_LIMIT = 28; // Speed at which you fly off
+  // Precompute track points for collision detection
+  const trackPoints = useMemo(() => spline.getSpacedPoints(1000), []);
+  const checkpoints = useMemo(() => [
+    trackPoints[0],
+    trackPoints[333],
+    trackPoints[666]
+  ], [trackPoints]);
+
+  // RC Physics constants
+  const ACCEL = 250;
+  const BRAKE = 350;
+  const REVERSE_ACCEL = 150;
+  const FRICTION = 60;
+  const MAX_SPEED = 450;
+  const MAX_REVERSE = 200;
+  const TURN_SPEED = 3.5; // Radians per second at full speed
+  const TRACK_RADIUS = 28; // Track width is 60, so radius is 30. Car has width.
 
   useEffect(() => {
+    const keys = {
+      w: false,
+      a: false,
+      s: false,
+      d: false,
+      up: false,
+      down: false,
+      left: false,
+      right: false,
+      space: false,
+    };
+
+    const updateControls = () => {
+      const accel = keys.w || keys.up || keys.space;
+      const rev = keys.s || keys.down;
+      let steer = 0;
+      if (keys.a || keys.left) steer = -1;
+      if (keys.d || keys.right) steer = 1;
+      if ((keys.a || keys.left) && (keys.d || keys.right)) steer = 0;
+      
+      useGameStore.getState().setControls(accel, rev, steer);
+    };
+
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.code === 'Space') {
-        setAccelerating(true);
-        motorSound.init(); // Init audio on first interaction
-      }
-      if (e.code === 'ArrowUp') {
+      let changed = false;
+      if (e.code === 'Space') { keys.space = true; changed = true; motorSound.init(); }
+      if (e.code === 'KeyW') { keys.w = true; changed = true; motorSound.init(); }
+      if (e.code === 'ArrowUp') { keys.up = true; changed = true; motorSound.init(); }
+      if (e.code === 'KeyS') { keys.s = true; changed = true; motorSound.init(); }
+      if (e.code === 'ArrowDown') { keys.down = true; changed = true; motorSound.init(); }
+      if (e.code === 'KeyA') { keys.a = true; changed = true; }
+      if (e.code === 'ArrowLeft') { keys.left = true; changed = true; }
+      if (e.code === 'KeyD') { keys.d = true; changed = true; }
+      if (e.code === 'ArrowRight') { keys.right = true; changed = true; }
+      
+      if (e.code === 'Equal' || e.code === 'NumpadAdd') {
         zoomLevel.current = Math.min(zoomLevel.current + 0.1, 4.0);
       }
-      if (e.code === 'ArrowDown') {
+      if (e.code === 'Minus' || e.code === 'NumpadSubtract') {
         zoomLevel.current = Math.max(zoomLevel.current - 0.1, 0.5);
       }
+
+      if (changed) updateControls();
     };
 
     const handleKeyUp = (e: KeyboardEvent) => {
-      if (e.code === 'Space') {
-        setAccelerating(false);
-      }
+      let changed = false;
+      if (e.code === 'Space') { keys.space = false; changed = true; }
+      if (e.code === 'KeyW') { keys.w = false; changed = true; }
+      if (e.code === 'ArrowUp') { keys.up = false; changed = true; }
+      if (e.code === 'KeyS') { keys.s = false; changed = true; }
+      if (e.code === 'ArrowDown') { keys.down = false; changed = true; }
+      if (e.code === 'KeyA') { keys.a = false; changed = true; }
+      if (e.code === 'ArrowLeft') { keys.left = false; changed = true; }
+      if (e.code === 'KeyD') { keys.d = false; changed = true; }
+      if (e.code === 'ArrowRight') { keys.right = false; changed = true; }
+
+      if (changed) updateControls();
     };
 
     window.addEventListener('keydown', handleKeyDown);
@@ -133,7 +187,7 @@ export const GameCanvas: React.FC = () => {
       window.removeEventListener('keyup', handleKeyUp);
       motorSound.stop();
     };
-  }, [setAccelerating]);
+  }, []);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -156,69 +210,79 @@ export const GameCanvas: React.FC = () => {
       lastTime.current = time;
 
       const state = useGameStore.getState();
-      const currentSpeedState = state.speed;
-      const isAccelerating = state.isAccelerating;
-      const isDerailed = state.isDerailed;
+      const { isAccelerating, isReversing, steering } = state;
 
       // Update audio
-      if (!isDerailed) {
-        motorSound.update(currentSpeedState, isAccelerating);
+      motorSound.update(Math.abs(carSpeed.current) / 10, isAccelerating || isReversing);
+
+      // Start timer on first movement
+      if (!hasStarted.current && Math.abs(carSpeed.current) > 0.1) {
+        hasStarted.current = true;
+      }
+      if (hasStarted.current) {
+        state.updateLapTime(delta);
+      }
+      
+      // RC Physics
+      let speed = carSpeed.current;
+      if (isAccelerating) {
+        if (speed < 0) speed += BRAKE * delta; // Braking
+        else speed += ACCEL * delta; // Accelerating
+      } else if (isReversing) {
+        if (speed > 0) speed -= BRAKE * delta; // Braking
+        else speed -= REVERSE_ACCEL * delta; // Reversing
       } else {
-        motorSound.stop();
+        // Friction
+        if (speed > 0) speed = Math.max(0, speed - FRICTION * delta);
+        if (speed < 0) speed = Math.min(0, speed + FRICTION * delta);
       }
 
-      if (!isDerailed) {
-        state.updateLapTime(delta);
-        
-        // Progressive Physics
-        let currentSpeed = currentSpeedState;
-        if (isAccelerating) {
-          // Acceleration curve: less acceleration at higher speeds
-          const accFactor = 1 - (currentSpeed / MAX_SPEED) * 0.5;
-          currentSpeed += ACCELERATION * accFactor * delta;
-        } else {
-          // Inertia: slow down gradually
-          const friction = currentSpeed > 10 ? BRAKING_FRICTION : COASTING_FRICTION;
-          currentSpeed -= friction * delta;
-        }
-        currentSpeed = Math.max(0, Math.min(currentSpeed, MAX_SPEED));
-        state.setSpeed(currentSpeed);
+      speed = Math.max(-MAX_REVERSE, Math.min(MAX_SPEED, speed));
 
-        // Move player
-        playerT.current += (currentSpeed * delta) / 150; // Track length divisor
-        if (playerT.current >= 1) {
-          playerT.current -= 1;
+      // Steering (only when moving)
+      if (Math.abs(speed) > 5) {
+        const turnDir = speed > 0 ? 1 : -1;
+        // Steering is -1 (left) to 1 (right)
+        carAngle.current += steering * TURN_SPEED * turnDir * delta * (Math.abs(speed) / MAX_SPEED);
+      }
+
+      carPos.current.x += Math.cos(carAngle.current) * speed * delta;
+      carPos.current.y += Math.sin(carAngle.current) * speed * delta;
+
+      // Collision detection
+      let minDist = Infinity;
+      let closestPt = trackPoints[0];
+      for (const pt of trackPoints) {
+        const dist = Math.hypot(carPos.current.x - pt.x, carPos.current.y - pt.y);
+        if (dist < minDist) {
+          minDist = dist;
+          closestPt = pt;
+        }
+      }
+
+      if (minDist > TRACK_RADIUS) {
+        // Push back inside the track
+        const angleToCenter = Math.atan2(closestPt.y - carPos.current.y, closestPt.x - carPos.current.x);
+        carPos.current.x = closestPt.x - Math.cos(angleToCenter) * TRACK_RADIUS;
+        carPos.current.y = closestPt.y - Math.sin(angleToCenter) * TRACK_RADIUS;
+        // Bounce / lose speed
+        speed *= -0.5;
+      }
+
+      carSpeed.current = speed;
+      state.setSpeed(Math.abs(speed) / 10); // Scale for UI
+
+      // Checkpoint logic for laps
+      const cpDist = Math.hypot(carPos.current.x - checkpoints[nextCheckpoint.current].x, carPos.current.y - checkpoints[nextCheckpoint.current].y);
+      if (cpDist < 60) {
+        nextCheckpoint.current = (nextCheckpoint.current + 1) % checkpoints.length;
+        if (nextCheckpoint.current === 1 && hasStarted.current) {
+          // Crossed start line!
           state.completeLap(useGameStore.getState().currentLapTime);
         }
-
-        // Cornering Physics
-        const curvature = spline.getSignedCurvature(playerT.current);
-        const absCurvature = Math.abs(curvature);
-        
-        // Centrifugal force
-        const force = currentSpeed * absCurvature;
-
-        // Drifting disabled per user request
-        driftAngle.current = 0;
-
-        // Derailment disabled per user request
-        lateralOffset.current = 0;
-      } else {
-        // Post-derail physics (slide to a stop)
-        let currentSpeed = currentSpeedState;
-        currentSpeed -= 20 * delta; // High friction on grass
-        currentSpeed = Math.max(0, currentSpeed);
-        state.setSpeed(currentSpeed);
-        
-        // Continue moving in the direction of the derailment
-        if (currentSpeed > 0) {
-            const curvature = spline.getSignedCurvature(playerT.current);
-            lateralOffset.current += currentSpeed * delta * 2 * Math.sign(curvature || 1);
-            playerT.current += (currentSpeed * delta) / 200; // Slower forward movement
-        }
       }
 
-      drawScene(ctx, canvas.width, canvas.height);
+      drawScene(ctx, canvas.width, canvas.height, steering);
       animationFrameId.current = requestAnimationFrame(render);
     };
 
@@ -230,7 +294,7 @@ export const GameCanvas: React.FC = () => {
     };
   }, []);
 
-  const drawScene = (ctx: CanvasRenderingContext2D, width: number, height: number) => {
+  const drawScene = (ctx: CanvasRenderingContext2D, width: number, height: number, steering: number) => {
     // Center the track in the screen
     ctx.save();
     // Calculate scale to fit track
@@ -265,53 +329,24 @@ export const GameCanvas: React.FC = () => {
     }
     ctx.stroke();
 
-    // Single Slot (Center)
-    ctx.lineWidth = 3;
-    ctx.strokeStyle = '#111';
+    // Start/Finish line
+    ctx.lineWidth = 60;
+    ctx.strokeStyle = '#fff';
     ctx.beginPath();
-    for (let i = 0; i <= numSegments; i++) {
-      const t = i / numSegments;
-      const p = spline.getPoint(t);
-      if (i === 0) ctx.moveTo(p.x, p.y);
-      else ctx.lineTo(p.x, p.y);
-    }
+    const startP = spline.getPoint(0);
+    const startTangent = spline.getTangent(0);
+    const startNormal = { x: -startTangent.y, y: startTangent.x };
+    ctx.moveTo(startP.x - startNormal.x * 30, startP.y - startNormal.y * 30);
+    ctx.lineTo(startP.x + startNormal.x * 30, startP.y + startNormal.y * 30);
     ctx.stroke();
     
-    // Slot metallic reflection
-    ctx.lineWidth = 1;
-    ctx.strokeStyle = '#888';
-    ctx.beginPath();
-    for (let i = 0; i <= numSegments; i++) {
-      const t = i / numSegments;
-      const p = spline.getPoint(t);
-      if (i === 0) ctx.moveTo(p.x - 1, p.y - 1);
-      else ctx.lineTo(p.x - 1, p.y - 1);
-    }
-    ctx.stroke();
-
-    // Draw Player Car (Center lane, with drift and offset)
-    drawCar(ctx, playerT.current, lateralOffset.current, driftAngle.current, '#ff0044', isDerailed);
+    // Draw Player Car
+    drawCar(ctx, carPos.current.x, carPos.current.y, carAngle.current, '#ff0044', steering);
 
     ctx.restore(); // Restore screen centering
   };
 
-  const drawCar = (ctx: CanvasRenderingContext2D, t: number, offset: number, drift: number, color: string, derailed: boolean) => {
-    const p = spline.getPoint(t);
-    const tangent = spline.getTangent(t);
-    const normal = { x: -tangent.y, y: tangent.x };
-    
-    let cx = p.x + normal.x * offset;
-    let cy = p.y + normal.y * offset;
-    let angle = Math.atan2(tangent.y, tangent.x);
-
-    if (!derailed) {
-        // Apply drift rotation
-        angle += drift;
-    } else {
-        // Spin out
-        angle += drift + (offset * 0.1);
-    }
-
+  const drawCar = (ctx: CanvasRenderingContext2D, cx: number, cy: number, angle: number, color: string, steering: number) => {
     ctx.save();
     ctx.translate(cx, cy);
     ctx.rotate(angle);
@@ -319,7 +354,7 @@ export const GameCanvas: React.FC = () => {
 
     // Shadow
     ctx.fillStyle = 'rgba(0,0,0,0.4)';
-    ctx.fillRect(-6, -2 + (drift * 5), 16, 8); // Shadow shifts during drift
+    ctx.fillRect(-6, -2, 16, 8); 
 
     // Body
     ctx.fillStyle = color;
@@ -342,20 +377,20 @@ export const GameCanvas: React.FC = () => {
     ctx.fillRect(6, -3, 2, 2); 
     ctx.fillRect(6, 1, 2, 2); 
     
-    // Wheels (turn slightly during drift)
+    // Wheels (turn slightly based on steering)
     ctx.fillStyle = '#222';
     ctx.fillRect(-6, -5, 4, 2); // RL
     ctx.fillRect(-6, 3, 4, 2); // RR
     
     ctx.save();
     ctx.translate(5, -4);
-    ctx.rotate(drift * 2); // Front wheels steer into drift
+    ctx.rotate(steering * 0.5); // Front wheels steer
     ctx.fillRect(-2, -1, 4, 2); // FL
     ctx.restore();
 
     ctx.save();
     ctx.translate(5, 4);
-    ctx.rotate(drift * 2);
+    ctx.rotate(steering * 0.5);
     ctx.fillRect(-2, -1, 4, 2); // FR
     ctx.restore();
 
@@ -369,6 +404,13 @@ export const GameCanvas: React.FC = () => {
         className="block"
         style={{ imageRendering: 'pixelated' }}
       />
+      <div className="absolute top-4 left-4 text-white font-pixel text-xl drop-shadow-[2px_2px_0px_#000]">
+        <p>LAP: {useGameStore((state) => state.laps)}</p>
+        <p>TIME: {useGameStore((state) => state.currentLapTime).toFixed(2)}s</p>
+        {useGameStore((state) => state.bestLap) !== null && (
+          <p className="text-green-400">BEST: {useGameStore((state) => state.bestLap)?.toFixed(2)}s</p>
+        )}
+      </div>
     </div>
   );
 };

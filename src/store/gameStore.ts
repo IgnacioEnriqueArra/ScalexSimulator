@@ -61,6 +61,8 @@ interface GameState {
   currentLapTime: number;
   isDerailed: boolean;
   isAccelerating: boolean;
+  isReversing: boolean;
+  steering: number;
   
   // Firebase state
   roomCode: string | null;
@@ -71,6 +73,7 @@ interface GameState {
   
   setSpeed: (speed: number) => void;
   setAccelerating: (isAcc: boolean) => void;
+  setControls: (acc: boolean, rev: boolean, steer: number) => void;
   derail: () => void;
   resetCar: () => void;
   completeLap: (time: number) => void;
@@ -92,6 +95,8 @@ export const useGameStore = create<GameState>((set, get) => ({
   currentLapTime: 0,
   isDerailed: false,
   isAccelerating: false,
+  isReversing: false,
+  steering: 0,
   
   roomCode: null,
   isHost: false,
@@ -102,19 +107,31 @@ export const useGameStore = create<GameState>((set, get) => ({
   setSpeed: (speed) => set({ speed }),
   setAccelerating: async (isAccelerating) => {
     set({ isAccelerating });
-    const { roomCode, isHost, user } = get();
+    const { roomCode, isHost, user, isReversing, steering } = get();
     
-    // If we are the controller, send the state to the host via Firestore
     if (roomCode && !isHost && user) {
       try {
         const roomRef = doc(db, 'rooms', roomCode);
-        await updateDoc(roomRef, { isAccelerating });
+        await updateDoc(roomRef, { isAccelerating, isReversing, steering });
       } catch (error) {
         handleFirestoreError(error, OperationType.UPDATE, `rooms/${roomCode}`);
       }
     }
   },
-  derail: () => set({ isDerailed: true, speed: 0, isAccelerating: false }),
+  setControls: async (acc, rev, steer) => {
+    set({ isAccelerating: acc, isReversing: rev, steering: steer });
+    const { roomCode, isHost, user } = get();
+    
+    if (roomCode && !isHost && user) {
+      try {
+        const roomRef = doc(db, 'rooms', roomCode);
+        await updateDoc(roomRef, { isAccelerating: acc, isReversing: rev, steering: steer });
+      } catch (error) {
+        handleFirestoreError(error, OperationType.UPDATE, `rooms/${roomCode}`);
+      }
+    }
+  },
+  derail: () => set({ isDerailed: true, speed: 0, isAccelerating: false, isReversing: false, steering: 0 }),
   resetCar: () => set({ isDerailed: false, speed: 0, currentLapTime: 0 }),
   completeLap: (time) => set((state) => ({
     laps: state.laps + 1,
@@ -150,6 +167,8 @@ export const useGameStore = create<GameState>((set, get) => ({
       await setDoc(roomRef, {
         hostId: user.uid,
         isAccelerating: false,
+        isReversing: false,
+        steering: 0,
         controllerConnected: false,
         createdAt: serverTimestamp()
       });
@@ -164,8 +183,12 @@ export const useGameStore = create<GameState>((set, get) => ({
           if (data.controllerConnected) {
             set({ isControllerConnected: true });
           }
-          // Host reads acceleration from controller
-          set({ isAccelerating: data.isAccelerating });
+          // Host reads controls from controller
+          set({ 
+            isAccelerating: data.isAccelerating || false,
+            isReversing: data.isReversing || false,
+            steering: data.steering || 0
+          });
         }
       }, (error) => {
         handleFirestoreError(error, OperationType.GET, `rooms/${code}`);

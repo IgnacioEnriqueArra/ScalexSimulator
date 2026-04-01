@@ -7,7 +7,7 @@ interface MainMenuProps {
 }
 
 export const MainMenu: React.FC<MainMenuProps> = ({ onStartGame, onStartController }) => {
-  const { initFirebase, createRoom, joinRoom, isAuthReady, user } = useGameStore();
+  const { initFirebase, createRoom, joinRoom, isAuthReady, user, isHost, isControllerConnected } = useGameStore();
   const [roomCode, setRoomCode] = useState('');
   const [error, setError] = useState('');
   const [isMobile, setIsMobile] = useState(false);
@@ -29,6 +29,12 @@ export const MainMenu: React.FC<MainMenuProps> = ({ onStartGame, onStartControll
     
     checkMobile();
   }, [initFirebase]);
+
+  useEffect(() => {
+    if (isHost && isControllerConnected) {
+      onStartGame();
+    }
+  }, [isHost, isControllerConnected, onStartGame]);
 
   const handleCreateGame = async () => {
     if (!isAuthReady || !user) {
@@ -67,7 +73,7 @@ export const MainMenu: React.FC<MainMenuProps> = ({ onStartGame, onStartControll
     <div className="min-h-screen bg-stone-900 flex items-center justify-center p-4 font-pixel">
       <div className="bg-stone-800 border-4 border-stone-600 p-8 max-w-md w-full shadow-[12px_12px_0px_rgba(0,0,0,0.5)]">
         <h1 className="text-4xl text-white text-center mb-8 drop-shadow-[2px_2px_0px_#000]">
-          SLOT CAR RACING
+          RC CAR RACING
         </h1>
 
         {hostCode ? (
@@ -79,12 +85,9 @@ export const MainMenu: React.FC<MainMenuProps> = ({ onStartGame, onStartControll
             <p className="text-stone-400 text-sm mb-8">
               Ingresa desde tu celular a esta misma web y usa este código para usarlo como mando.
             </p>
-            <button
-              onClick={onStartGame}
-              className="w-full bg-white text-stone-900 px-6 py-4 text-xl border-b-4 border-stone-400 hover:bg-stone-200 hover:border-stone-500 active:border-b-0 active:translate-y-1 transition-all"
-            >
-              JUGAR AHORA (TECLADO)
-            </button>
+            <div className="w-full bg-stone-700 text-stone-300 px-6 py-4 text-xl border-b-4 border-stone-900 animate-pulse">
+              ESPERANDO MANDO...
+            </div>
           </div>
         ) : isMobile ? (
           <div className="flex flex-col gap-4">

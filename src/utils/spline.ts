@@ -92,4 +92,12 @@ export class Spline2D {
     
     return cross > 0 ? angle / (delta * 2) : -angle / (delta * 2);
   }
+
+  getSpacedPoints(count: number): { x: number; y: number }[] {
+    const points = [];
+    for (let i = 0; i < count; i++) {
+      points.push(this.getPoint(i / count));
+    }
+    return points;
+  }
 }

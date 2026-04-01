@@ -27,9 +27,11 @@ service cloud.firestore {
     }
 
     function isValidRoom(data) {
-      return hasOnlyAllowedFields(['hostId', 'isAccelerating', 'controllerConnected', 'createdAt']) &&
+      return hasOnlyAllowedFields(['hostId', 'isAccelerating', 'isReversing', 'steering', 'controllerConnected', 'createdAt']) &&
              data.hostId is string && data.hostId.size() > 0 && data.hostId.size() < 50 &&
              data.isAccelerating is bool &&
+             data.isReversing is bool &&
+             data.steering is number &&
              data.controllerConnected is bool;
     }
 
