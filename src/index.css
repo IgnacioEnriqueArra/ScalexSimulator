@@ -1,0 +1,10 @@
+@import "tailwindcss";
+
+@theme {
+  --font-pixel: "VT323", monospace;
+}
+
+body {
+  font-family: var(--font-pixel);
+  image-rendering: pixelated;
+}
