@@ -7,14 +7,15 @@ interface MainMenuProps {
 }
 
 export const MainMenu: React.FC<MainMenuProps> = ({ onStartGame, onStartController }) => {
-  const { initSocket, createRoom, joinRoom } = useGameStore();
+  const { initFirebase, createRoom, joinRoom, isAuthReady, user } = useGameStore();
   const [roomCode, setRoomCode] = useState('');
   const [error, setError] = useState('');
   const [isMobile, setIsMobile] = useState(false);
   const [hostCode, setHostCode] = useState<string | null>(null);
+  const [isCreating, setIsCreating] = useState(false);
 
   useEffect(() => {
-    initSocket();
+    initFirebase();
     
     // Simple mobile detection
     const checkMobile = () => {
@@ -27,14 +28,28 @@ export const MainMenu: React.FC<MainMenuProps> = ({ onStartGame, onStartControll
     };
     
     checkMobile();
-  }, [initSocket]);
+  }, [initFirebase]);
 
-  const handleCreateGame = () => {
-    const code = createRoom();
-    setHostCode(code);
+  const handleCreateGame = async () => {
+    if (!isAuthReady || !user) {
+      setError('Conectando al servidor...');
+      return;
+    }
+    setIsCreating(true);
+    const code = await createRoom();
+    if (code) {
+      setHostCode(code);
+    } else {
+      setError('Error al crear la partida');
+    }
+    setIsCreating(false);
   };
 
   const handleJoinGame = async () => {
+    if (!isAuthReady || !user) {
+      setError('Conectando al servidor...');
+      return;
+    }
     if (roomCode.length !== 4) {
       setError('El código debe tener 4 dígitos');
       return;
@@ -92,11 +107,13 @@ export const MainMenu: React.FC<MainMenuProps> = ({ onStartGame, onStartControll
           </div>
         ) : (
           <div className="flex flex-col gap-4">
+            {error && <p className="text-red-500 text-center text-sm">{error}</p>}
             <button
               onClick={handleCreateGame}
-              className="w-full bg-green-500 text-white px-6 py-4 text-xl border-b-4 border-green-700 hover:bg-green-400 hover:border-green-600 active:border-b-0 active:translate-y-1 transition-all"
+              disabled={isCreating || !isAuthReady}
+              className="w-full bg-green-500 text-white px-6 py-4 text-xl border-b-4 border-green-700 hover:bg-green-400 hover:border-green-600 active:border-b-0 active:translate-y-1 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              CREAR PARTIDA
+              {isCreating ? 'CREANDO...' : 'CREAR PARTIDA'}
             </button>
             <button
               onClick={() => setIsMobile(true)}

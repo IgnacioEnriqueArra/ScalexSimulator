@@ -1,0 +1,36 @@
+{
+  "entities": {
+    "Room": {
+      "title": "Room",
+      "description": "A game room connecting a host (screen) and a controller (mobile).",
+      "type": "object",
+      "properties": {
+        "hostId": {
+          "type": "string",
+          "description": "The UID of the user who created the room."
+        },
+        "isAccelerating": {
+          "type": "boolean",
+          "description": "Whether the controller is currently pressing the gas."
+        },
+        "controllerConnected": {
+          "type": "boolean",
+          "description": "Whether a controller has joined the room."
+        },
+        "createdAt": {
+          "type": "timestamp",
+          "description": "When the room was created."
+        }
+      },
+      "required": ["hostId", "isAccelerating", "controllerConnected", "createdAt"]
+    }
+  },
+  "firestore": {
+    "rooms/{roomId}": {
+      "schema": {
+        "$ref": "#/entities/Room"
+      },
+      "description": "Stores active game rooms. The roomId is a 4-digit code."
+    }
+  }
+}
